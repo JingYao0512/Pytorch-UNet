@@ -1,10 +1,10 @@
 """ Parts of the U-Net model """
-
+## 定義Model Layer
 import torch
-import torch.nn as nn
+import torch.nn as nn ## Neural Network
 import torch.nn.functional as F
 
-
+##  雙層的卷積層
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
@@ -20,7 +20,8 @@ class DoubleConv(nn.Module):
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
-
+    
+    ## 用於定義網路的前向傳播過程。在前向傳播中，輸入影像將經過編碼器和解碼器，最終得到像素級別的分割預測結果。
     def forward(self, x):
         return self.double_conv(x)
 
@@ -53,17 +54,22 @@ class Up(nn.Module):
             self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
             self.conv = DoubleConv(in_channels, out_channels)
 
-    def forward(self, x1, x2):
+    def forward(self, x1, x2): ## 在向上採樣(Up-sampling時)會將Decoder與Encoder的特徵圖進行串接
         x1 = self.up(x1)
-        # input is CHW
-        diffY = x2.size()[2] - x1.size()[2]
+        
+        # input is CHW 
+        # 計算x1做完up-sampling後，與x2的大小差異
+        diffY = x2.size()[2] - x1.size()[2] 
         diffX = x2.size()[3] - x1.size()[3]
 
+        # 如果有差異，則對x1做padding
         x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
                         diffY // 2, diffY - diffY // 2])
         # if you have padding issues, see
         # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
         # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
+        
+        # concate
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
 

@@ -50,11 +50,12 @@ def train_model(
     train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
 
     # 3. Create data loaders
-    loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
+    loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True) # pin_memory 則用於將數據載入 GPU 的固定內存中，提高數據讀取效率。
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
 
     # (Initialize logging)
+    # wandb（Weights & Biases）來進行實驗的記錄和監控。
     experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
     experiment.config.update(
         dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
@@ -76,8 +77,12 @@ def train_model(
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
     optimizer = optim.RMSprop(model.parameters(),
                               lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score # patience=5 表示當驗證指標在 5 個 epoch 內沒有改善時，調整學習率。
+    
+     # 梯度放大器（grad_scaler）：這是使用 PyTorch 中的混合精度訓練（Mixed Precision Training）所需的梯度放大器。
+    #當 enabled=amp 時，使用混合精度訓練來加快訓練速度並節省 GPU 記憶體。
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
+
     criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
     global_step = 0
 
@@ -110,10 +115,17 @@ def train_model(
                             multiclass=True
                         )
 
-                optimizer.zero_grad(set_to_none=True)
-                grad_scaler.scale(loss).backward()
+                optimizer.zero_grad(set_to_none=True)  # 將優化器中所有模型參數的梯度設置為零。set_to_none=True 參數可使梯度佔用的 GPU 記憶體釋放，從而節省 GPU 記憶體。
+                grad_scaler.scale(loss).backward() # 將訓練的損失（loss）應用梯度放大器的 scale 方法進行梯度放大，然後使用 backward 方法計算梯度。梯度放大可以避免在反向傳播時由於梯度消失而導致的數值不穩定情況。
+                
+                # 將訓練的損失（loss）應用梯度放大器的 scale 方法進行梯度放大
+                # 然後使用 backward 方法計算梯度。
+                # 梯度放大可以避免在反向傳播時由於梯度消失而導致的數值不穩定情況。
                 torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
+                #grad_scaler.step(optimizer)：根據梯度放大器中的縮放比例來更新優化器的參數。
+                # 這是混合精度訓練中特有的操作，能夠有效地更新模型的參數。
                 grad_scaler.step(optimizer)
+
                 grad_scaler.update()
 
                 pbar.update(images.shape[0])
